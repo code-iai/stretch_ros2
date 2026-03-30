@@ -213,8 +213,9 @@ class StretchDriver(Node):
             self.robot.head.get_joint('head_tilt').set_velocity(qvel[Idx.HEAD_TILT])
 
             if 'stretch_gripper' in self.robot.end_of_arm.joints:
-                pos = self.gripper_conversion.finger_to_robotis(qvel[Idx.GRIPPER])
+                pos = self.gripper_conversion.finger_to_robotis(qvel[-1])
                 print("SET GRIPPER: ", pos)
+                print("IDX gripper: ", Idx.GRIPPER)
                 self.robot.end_of_arm.move_to('stretch_gripper', pos)
             
             # self.get_logger().info(f"Moved at velocity qvel: {qvel}")
