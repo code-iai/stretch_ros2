@@ -1,10 +1,11 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, EnvironmentVariable, PathJoinSubstitution
 from ament_index_python.packages import get_package_share_directory
+from launch.actions import GroupAction, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def generate_launch_description():
@@ -40,8 +41,6 @@ def generate_launch_description():
         }.items()
     )
 
-    from launch.actions import GroupAction, IncludeLaunchDescription
-    from launch.launch_description_sources import PythonLaunchDescriptionSource
 
     head_camera = GroupAction(
         scoped=True,
