@@ -213,11 +213,9 @@ class StretchDriver(Node):
             self.robot.head.get_joint('head_tilt').set_velocity(qvel[Idx.HEAD_TILT])
 
             if 'stretch_gripper' in self.robot.end_of_arm.joints:
-                # Assuming gripper also supports set_velocity or similar if needed, 
-                # but the issue description focuses on arm, lift, end_of_arm and head.
-                # Usually gripper is position controlled or has a different API for velocity.
-                # For now, let's stick to requested joints.
-                pass
+                print("SET GRIPPER")
+                pos = self.gripper_conversion.finger_to_robotis(qvel[Idx.GRIPPER])
+                self.robot.end_of_arm.move_to('stretch_gripper', pos)
             
             self.get_logger().info(f"Moved at velocity qvel: {qvel}")
         except Exception as e:
@@ -258,7 +256,8 @@ class StretchDriver(Node):
         # Set joint velocities to 0.0 if the commands are stale
         if self.streaming_velocity_activated:
             time_since_last_joint_vel = self.get_clock().now() - self.last_joint_velocity_time
-            if time_since_last_joint_vel > self.timeout:
+            if time_since_last_joint_vel.nanoseconds > self.timeout.nanoseconds * 10000:
+                print("RESET")
                 self.robot.arm.set_velocity(0.0)
                 self.robot.lift.set_velocity(0.0)
                 self.robot.end_of_arm.get_joint('wrist_yaw').set_velocity(0.0)
