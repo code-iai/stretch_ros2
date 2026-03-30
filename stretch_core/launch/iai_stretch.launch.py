@@ -40,24 +40,37 @@ def generate_launch_description():
         }.items()
     )
 
-    # Head camera (D435i, low resolution)
-    head_camera_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(stretch_core_dir, 'launch', 'd435i_low_resolution.launch.py')
-        )
+    from launch.actions import GroupAction, IncludeLaunchDescription
+    from launch.launch_description_sources import PythonLaunchDescriptionSource
+
+    head_camera = GroupAction(
+        scoped=True,
+        forwarding=False,
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(stretch_core_dir, 'launch', 'd435i_low_resolution.launch.py')
+                )
+            )
+        ],
     )
 
-    # Hand camera (D405 basic)
-    hand_camera_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(stretch_core_dir, 'launch', 'd405_basic.launch.py')
-        )
+    hand_camera = GroupAction(
+        scoped=True,
+        forwarding=False,
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(stretch_core_dir, 'launch', 'd405_basic.launch.py')
+                )
+            )
+        ],
     )
 
     return LaunchDescription([
         map_arg,
         use_rviz_arg,
         navigation_launch,
-        head_camera_launch,
-        hand_camera_launch,
+        head_camera,
+        hand_camera,
     ])
