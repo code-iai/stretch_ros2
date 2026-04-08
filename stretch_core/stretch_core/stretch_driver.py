@@ -213,8 +213,15 @@ class StretchDriver(Node):
             self.robot.head.get_joint('head_tilt').set_velocity(qvel[Idx.HEAD_TILT])
 
             if 'stretch_gripper' in self.robot.end_of_arm.joints:
-                pos = qvel[Idx.GRIPPER]
-                self.robot.end_of_arm.get_joint('stretch_gripper').set_velocity(pos)
+
+                # Get the command
+                val_rad_s = qvel[Idx.GRIPPER]
+
+                # Conversion into hardware friendly Robotis unit
+                robotis_vel = self.gripper_conversion.finger_vel_to_robotis(val_rad_s)
+
+                # Command the hardware
+                self.robot.end_of_arm.get_joint('stretch_gripper').set_velocity(robotis_vel)
             
             # self.get_logger().info(f"Moved at velocity qvel: {qvel}")
         except Exception as e:
