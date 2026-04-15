@@ -42,6 +42,19 @@ class GripperConversion:
         finger_rad = (aperture_m/2.0)/self.finger_length_m
         return finger_rad
 
+    def finger_vel_to_robotis(self, finger_vel_rad):
+        """
+        Converts velocity from finger radians/sec to Robot's velocity unit.
+        This function can be used by move_at_velocity().
+        """
+        # Convert finger angular velocity to aperture linear velocity
+        aperture_vel_m = 2.0 * (finger_vel_rad * self.finger_length_m)
+
+        # Convert aperture linear velocity to Robot's velocity units
+        robotis_vel_out = aperture_vel_m / self.robotis_to_aperture_slope
+
+        return robotis_vel_out
+
     def finger_rad_to_aperture(self, finger_rad):
         aperture_m = 2.0 * (finger_rad * self.finger_length_m)
         return aperture_m
