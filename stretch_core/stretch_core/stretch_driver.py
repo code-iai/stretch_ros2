@@ -87,6 +87,7 @@ class StretchDriver(Node):
         if STREAMING_POSITION_DEBUG:
             self.streaming_controller_lt = LoopTimer(name="Streaming Position", print_debug=STREAMING_POSITION_DEBUG)
         self.streaming_position_activated = False
+        self.streaming_velocity_activated = False
         self.ros_setup()
 
     def set_gamepad_motion_callback(self, joy):
@@ -141,6 +142,26 @@ class StretchDriver(Node):
         if STREAMING_POSITION_DEBUG:
             self.streaming_controller_lt.update()
     
+    def set_robot_velocity_callback(self, msg):
+        self.robot_mode_rwlock.acquire_read()
+        if not self.streaming_velocity_activated:
+            self.get_logger().error('Streaming velocity is not activated.'
+                                    ' Please activate streaming velocity to receive command to joint_velocity_cmd.')
+            self.robot_mode_rwlock.release_read()
+            return
+        
+        if not self.robot_mode in ['position', 'navigation']:
+            self.get_logger().error('{0} must be in position or navigation mode with streaming_velocity activated ' 
+                                    'enabled to receive command to joint_velocity_cmd. '
+                                    'Current mode = {1}.'.format(self.node_name, self.robot_mode))
+            self.robot_mode_rwlock.release_read()
+            return
+
+        qvel = msg.data
+        self.move_at_velocity(qvel)
+        self.last_joint_velocity_time = self.get_clock().now()
+        self.robot_mode_rwlock.release_read()
+    
     def move_to_position(self, qpos):
         try:
             try:
@@ -171,6 +192,40 @@ class StretchDriver(Node):
             self.get_logger().info(f"Moved to position qpos: {qpos}")
         except Exception as e:
             self.get_logger().error('Failed to move to position: {0}'.format(e))
+
+    def move_at_velocity(self, qvel):
+        try:
+            try:
+                Idx = get_Idx(self.robot.params['tool'])
+            except UnsupportedToolError:
+                self.get_logger().error('Unsupported tool for streaming velocity control.')
+            if len(qvel) != Idx.num_joints:
+                self.get_logger().error('Received qvel does not match the number of joints in the robot')
+                return
+            self.robot.arm.set_velocity(qvel[Idx.ARM])
+            self.robot.lift.set_velocity(qvel[Idx.LIFT])
+            self.robot.end_of_arm.get_joint('wrist_yaw').set_velocity(qvel[Idx.WRIST_YAW])
+            if 'wrist_pitch' in self.robot.end_of_arm.joints:
+                self.robot.end_of_arm.get_joint('wrist_pitch').set_velocity(qvel[Idx.WRIST_PITCH])
+            if 'wrist_roll' in self.robot.end_of_arm.joints:
+                self.robot.end_of_arm.get_joint('wrist_roll').set_velocity(qvel[Idx.WRIST_ROLL])
+            self.robot.head.get_joint('head_pan').set_velocity(qvel[Idx.HEAD_PAN])
+            self.robot.head.get_joint('head_tilt').set_velocity(qvel[Idx.HEAD_TILT])
+
+            if 'stretch_gripper' in self.robot.end_of_arm.joints:
+
+                # Get the command
+                val_rad_s = qvel[Idx.GRIPPER]
+
+                # Conversion into hardware friendly Robotis unit
+                robotis_vel = self.gripper_conversion.finger_vel_to_robotis(val_rad_s)
+
+                # Command the hardware
+                self.robot.end_of_arm.get_joint('stretch_gripper').set_velocity(robotis_vel)
+            
+            # self.get_logger().info(f"Moved at velocity qvel: {qvel}")
+        except Exception as e:
+            self.get_logger().error('Failed to move at velocity: {0}'.format(e))
 
     def command_mobile_base_velocity_and_publish_state(self):
         self.robot_mode_rwlock.acquire_read()
@@ -203,6 +258,21 @@ class StretchDriver(Node):
             else:
                 self.robot.base.set_velocity(0.0, 0.0)
                 # self.robot.push_command() #Moved to main
+
+        # Set joint velocities to 0.0 if the commands are stale
+        if self.streaming_velocity_activated:
+            time_since_last_joint_vel = self.get_clock().now() - self.last_joint_velocity_time
+            if time_since_last_joint_vel.nanoseconds > self.timeout.nanoseconds * 10000:
+                print("RESET")
+                self.robot.arm.set_velocity(0.0)
+                self.robot.lift.set_velocity(0.0)
+                self.robot.end_of_arm.get_joint('wrist_yaw').set_velocity(0.0)
+                if 'wrist_pitch' in self.robot.end_of_arm.joints:
+                    self.robot.end_of_arm.get_joint('wrist_pitch').set_velocity(0.0)
+                if 'wrist_roll' in self.robot.end_of_arm.joints:
+                    self.robot.end_of_arm.get_joint('wrist_roll').set_velocity(0.0)
+                self.robot.head.get_joint('head_pan').set_velocity(0.0)
+                self.robot.head.get_joint('head_tilt').set_velocity(0.0)
 
         # get copy of the current robot status (uses lock held by the robot)
         robot_status = self.robot.get_status()
@@ -435,6 +505,11 @@ class StretchDriver(Node):
         streaming_position_status = Bool()
         streaming_position_status.data = self.streaming_position_activated
         self.streaming_position_mode_pub.publish(streaming_position_status)
+
+        # publish streaming velocity status
+        streaming_velocity_status = Bool()
+        streaming_velocity_status.data = self.streaming_velocity_activated
+        self.streaming_velocity_mode_pub.publish(streaming_velocity_status)
 
         # publish joint state for the arm
         joint_state = JointState()
@@ -681,6 +756,16 @@ class StretchDriver(Node):
         self.get_logger().info('Deactivated streaming position.')
         return True, 'Deactivated streaming position.'
     
+    def activate_streaming_velocity(self, request):
+        self.streaming_velocity_activated = True
+        self.get_logger().info('Activated streaming velocity.')
+        return True, 'Activated streaming velocity.'
+
+    def deactivate_streaming_velocity(self, request):
+        self.streaming_velocity_activated = False
+        self.get_logger().info('Deactivated streaming velocity.')
+        return True, 'Deactivated streaming velocity.'
+    
     # SERVICE CALLBACKS ##############
 
     def stop_the_robot_callback(self, request, response):
@@ -756,6 +841,18 @@ class StretchDriver(Node):
 
     def deactivate_streaming_position_service_callback(self, request, response):
         success, message = self.deactivate_streaming_position(request)
+        response.success = success
+        response.message = message
+        return response
+
+    def activate_streaming_velocity_service_callback(self, request, response):
+        success, message = self.activate_streaming_velocity(request)
+        response.success = success
+        response.message = message
+        return response
+
+    def deactivate_streaming_velocity_service_callback(self, request, response):
+        success, message = self.deactivate_streaming_velocity(request)
         response.success = success
         response.message = message
         return response
@@ -968,6 +1065,7 @@ class StretchDriver(Node):
         self.mode_pub = self.create_publisher(String, 'mode', 1)
         self.tool_pub = self.create_publisher(String, 'tool', 1)
         self.streaming_position_mode_pub = self.create_publisher(Bool, 'is_streaming_position', 1)
+        self.streaming_velocity_mode_pub = self.create_publisher(Bool, 'is_streaming_velocity', 1)
 
         self.imu_mobile_base_pub = self.create_publisher(Imu, 'imu_mobile_base', 1)
         self.magnetometer_mobile_base_pub = self.create_publisher(MagneticField, 'magnetometer_mobile_base', 1)
@@ -984,6 +1082,8 @@ class StretchDriver(Node):
         self.create_subscription(Joy, "gamepad_joy", self.set_gamepad_motion_callback, 1, callback_group=self.main_group)
 
         self.create_subscription(Float64MultiArray, "joint_pose_cmd", self.set_robot_streaming_position_callback, 1, callback_group=self.main_group)
+
+        self.create_subscription(Float64MultiArray, "joint_velocity_cmd", self.set_robot_velocity_callback, 1, callback_group=self.main_group)
 
         self.declare_parameter('rate', 30.0)
         self.joint_state_rate = self.get_parameter('rate').value
@@ -1012,6 +1112,7 @@ class StretchDriver(Node):
 
         self.last_twist_time = self.get_clock().now()
         self.last_gamepad_joy_time = self.get_clock().now()
+        self.last_joint_velocity_time = self.get_clock().now()
 
         # Add a callback for updating parameters
         self.add_on_set_parameters_callback(self.parameter_callback)
@@ -1046,6 +1147,16 @@ class StretchDriver(Node):
         self.deactivate_streaming_position_service = self.create_service(Trigger,
                                                                 '/deactivate_streaming_position',
                                                                 self.deactivate_streaming_position_service_callback,
+                                                                callback_group=self.main_group)
+
+        self.activate_streaming_velocity_service = self.create_service(Trigger,
+                                                                '/activate_streaming_velocity',
+                                                                self.activate_streaming_velocity_service_callback,
+                                                                callback_group=self.main_group)
+
+        self.deactivate_streaming_velocity_service = self.create_service(Trigger,
+                                                                '/deactivate_streaming_velocity',
+                                                                self.deactivate_streaming_velocity_service_callback,
                                                                 callback_group=self.main_group)
 
         self.stop_the_robot_service = self.create_service(Trigger,
